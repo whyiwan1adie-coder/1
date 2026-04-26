@@ -3,23 +3,24 @@
     "target": "ESNext",
     "useDefineForClassFields": true,
     "lib": [ "DOM", "DOM.Iterable", "ESNext" ],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "skipLibCheck": true,
+
+    /* Это решит твои ошибки: */
+    "moduleResolution": "node",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx", // Это убирает ошибку "TS cannot use JSX"
-    "baseUrl": ".",
-    "paths": {
-      "*": [ "node_modules/*" ]
-    },
-    "types": [ "node" ]
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* Strict Mode */
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true
   },
   "include": [ "src" ],
   "references": [ { "path": "./tsconfig.node.json" } ]
