@@ -11,30 +11,26 @@ model User {
   id           String   @id @default(uuid())
   username     String   @unique
   passwordHash String
-  
-  // Это поле мы будем использовать для публичного ключа шифрования
   publicKey    String?  
-
-  // Твои текущие поля профиля
-  gender       String
-  age          Int
-  location     String
-  bio          String?
+  avatar       String?  // Фото профиля
+  nickname     String?  // Публичный позывной
+  bio          String?  // Описание или статус профиля
+  gender       String   @default("не указан")
+  age          Int      @default(0)
+  location     String   @default("не указано")
   createdAt    DateTime @default(now())
 
-  // Связь: сообщения, которые лежат на сервере и ждут этого пользователя
   receivedMessages Message[] @relation("ReceiverRelation")
   sentMessages     Message[] @relation("SenderRelation")
 }
 
 model Message {
   id          String   @id @default(uuid())
-  content     String   // Зашифрованный текст или обычный (пока настраиваем)
+  content     String   
   senderId    String
   receiverId  String
   createdAt   DateTime @default(now())
 
-  // Отношения (чтобы Prisma понимала, кто кому пишет)
   sender      User     @relation("SenderRelation", fields: [senderId], references: [id])
   receiver    User     @relation("ReceiverRelation", fields: [receiverId], references: [id])
 }

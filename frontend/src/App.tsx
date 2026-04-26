@@ -1,163 +1,271 @@
-import React, { useState } from "react";
-import Register from "./Register";
-import { Chat } from "./Chat";
-import { Profile } from "./Profile";
+import React, { useState, useEffect } from 'react';
+import { Chat } from './Chat';
 
-// Главный интерфейс пользователя
+// Интерфейс данных пользователя для типизации
 export interface UserData {
     username: string;
-    login: string;
-    hashPassword: string;
-    encryptionKey: string;
     photo?: string;
+    nickname?: string;
+    bio?: string;
 }
 
-export default function App() {
-    // 1. Инициализация пользователя из localStorage
-    const [user, setUser] = useState<UserData | null>(() => {
-        const savedUser = localStorage.getItem('hush_user');
-        return savedUser ? JSON.parse(savedUser) : null;
-    });
+const App: React.FC = () => {
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isRegistering, setIsRegistering] = useState(false);
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
 
-    // 2. Управление экранами
-    const [screen, setScreen] = useState<'auth' | 'profile' | 'chats'>(() => {
-        const savedUser = localStorage.getItem('hush_user');
-        return savedUser ? 'profile' : 'auth';
-    });
+    // Поля регистрации
+    const [gender, setGender] = useState('');
+    const [age, setAge] = useState('');
+    const [location, setLocation] = useState('');
 
-    const handleLogin = (userData: UserData) => {
-        setUser(userData);
-        setScreen('profile');
-        localStorage.setItem('hush_user', JSON.stringify(userData));
+    // --- ЛОГИКА САМОВОССТАНОВЛЕНИЯ (Удаляет старый мусор из памяти) ---
+    useEffect(() => {
+        const session = localStorage.getItem('hush_session');
+        if (session) {
+            try {
+                const parsed = JSON.parse(session);
+                // Если сессия валидна и есть имя пользователя — пускаем
+                if (parsed && parsed.username) {
+                    setIsLoggedIn(true);
+                } else {
+                    // Если формат старый или битый — чистим
+                    localStorage.removeItem('hush_session');
+                }
+            } catch (e) {
+                console.error("Session corruption detected, clearing storage...");
+                localStorage.clear();
+                setIsLoggedIn(false);
+            }
+        }
+    }, []);
+
+    const handleLogin = async () => {
+        if (!username || !password) return alert('CREDENTIALS_REQUIRED');
+        try {
+            const res = await fetch('http://localhost:3001/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password }),
+            });
+            const data = await res.json();
+            if (res.ok && data.username) {
+                localStorage.setItem('hush_session', JSON.stringify(data));
+                setIsLoggedIn(true);
+            } else {
+                alert(data.error || 'AUTHORIZATION_FAILED');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('SYSTEM_OFFLINE: SERVER_UNREACHABLE');
+        }
     };
 
-    const handleLogout = () => {
-        setUser(null);
-        setScreen('auth');
-        localStorage.removeItem('hush_user');
+    const handleRegister = async () => {
+        if (!username || !password) return alert('DATA_REQUIRED');
+        try {
+            const res = await fetch('http://localhost:3001/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, gender, age, location }),
+            });
+            if (res.ok) {
+                alert('IDENTITY_INITIALIZED. PROCEED TO LOGIN.');
+                setIsRegistering(false);
+            } else {
+                const data = await res.json();
+                alert(data.error || 'REGISTRATION_FAILED');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('SYSTEM_OFFLINE: SERVER_UNREACHABLE');
+        }
     };
 
-    const handleUpdateUser = (updatedData: UserData) => {
-        setUser(updatedData);
-        localStorage.setItem('hush_user', JSON.stringify(updatedData));
-    };
+    // --- ЭКРАН ЧАТА ---
+    if (isLoggedIn) {
+        let userData: UserData = { username: '' };
+        try {
+            userData = JSON.parse(localStorage.getItem('hush_session') || '{}');
+        } catch (e) {
+            localStorage.clear();
+            window.location.reload();
+        }
 
-    // Если пользователь не авторизован, показываем экран регистрации
-    if (screen === 'auth' && !user) {
-        return <Register onRegister={handleLogin} />;
+        return (
+            <div style={containerStyle}>
+                <div style={headerArea}>
+                    <h1 style={logoStyle}>HUSH // PROTECTED_NETWORK</h1>
+                    <button style={logoutBtn} onClick={() => { localStorage.clear(); window.location.reload(); }}>
+                        TERMINATE_SESSION
+                    </button>
+                </div>
+                {userData.username ? <Chat username={userData.username} /> : null}
+            </div>
+        );
     }
 
-    // Стили для навигации (эффект стекла)
-    const navStyle: React.CSSProperties = {
-        display: 'flex',
-        justifyContent: 'center',
-        gap: '40px',
-        padding: '20px',
-        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-        backdropFilter: 'blur(10px)',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100
-    };
-
-    const getNavBtnStyle = (isActive: boolean): React.CSSProperties => ({
-        background: 'none',
-        border: 'none',
-        color: isActive ? '#22d3ee' : '#94a3b8', // cyan-400 или slate-400
-        fontSize: '14px',
-        fontWeight: '600',
-        letterSpacing: '0.2em',
-        textTransform: 'uppercase',
-        cursor: 'pointer',
-        transition: 'all 0.3s ease',
-        borderBottom: isActive ? '2px solid #22d3ee' : '2px solid transparent',
-        paddingBottom: '5px'
-    });
-
+    // --- ЭКРАН ВХОДА / РЕГИСТРАЦИИ ---
     return (
-        <div style={{
-            backgroundColor: '#020203',
-            minHeight: '100vh',
-            color: 'white',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            position: 'relative',
-            overflow: 'hidden'
-        }}>
-            {/* ФОНОВЫЕ ГРАДИЕНТЫ (как в Register) */}
-            <div style={{
-                position: 'absolute', top: '-10%', left: '-10%',
-                width: '50%', height: '50%', borderRadius: '50%',
-                background: 'rgba(124, 58, 237, 0.08)', // Violet
-                filter: 'blur(120px)', zIndex: 0
-            }}></div>
-            <div style={{
-                position: 'absolute', bottom: '-10%', right: '-10%',
-                width: '50%', height: '50%', borderRadius: '50%',
-                background: 'rgba(5, 150, 105, 0.05)', // Emerald
-                filter: 'blur(120px)', zIndex: 0
-            }}></div>
+        <div style={authContainerStyle}>
+            <div style={authCardStyle}>
+                <h1 style={authTitleStyle}>{isRegistering ? 'JOIN_NETWORK' : 'AUTHORIZE'}</h1>
+                <p style={authSubtitleStyle}>
+                    {isRegistering ? 'CREATE ANONYMOUS IDENTITY' : 'ESTABLISH SECURE LINK'}
+                </p>
 
-            {/* ОСНОВНОЙ КОНТЕНТ */}
-            <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={formStyle}>
+                    <input
+                        style={inputStyle}
+                        placeholder="USERNAME"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                    />
+                    <input
+                        style={inputStyle}
+                        type="password"
+                        placeholder="PASSWORD"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                    />
 
-                {/* Навигация */}
-                <nav style={navStyle}>
-                    <button
-                        onClick={() => setScreen('profile')}
-                        style={getNavBtnStyle(screen === 'profile')}
-                    >
-                        Профиль
-                    </button>
-                    <button
-                        onClick={() => setScreen('chats')}
-                        style={getNavBtnStyle(screen === 'chats')}
-                    >
-                        Чаты
-                    </button>
-                    <button
-                        onClick={handleLogout}
-                        style={{ ...getNavBtnStyle(false), color: '#ef4444', borderBottom: 'none' }}
-                    >
-                        Выход
-                    </button>
-                </nav>
-
-                {/* Экраны */}
-                <div style={{
-                    maxWidth: '600px',
-                    margin: '0 auto',
-                    padding: '40px 20px',
-                    animation: 'fadeIn 0.5s ease-out'
-                }}>
-                    {screen === 'profile' && user && (
-                        <Profile user={user} onUpdate={handleUpdateUser} />
-                    )}
-
-                    {screen === 'chats' && user && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                            <h2 style={{
-                                fontSize: '24px',
-                                fontWeight: '800',
-                                textAlign: 'center',
-                                letterSpacing: '0.1em',
-                                color: '#22d3ee'
-                            }}>
-                                MESSENGER
-                            </h2>
-                            <Chat username={user.username} />
+                    {isRegistering && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <input style={{ ...inputStyle, flex: 1 }} placeholder="GENDER" onChange={e => setGender(e.target.value)} />
+                                <input style={{ ...inputStyle, width: '100px' }} placeholder="AGE" type="number" onChange={e => setAge(e.target.value)} />
+                            </div>
+                            <input style={inputStyle} placeholder="PHYSICAL_LOCATION (OPTIONAL)" onChange={e => setLocation(e.target.value)} />
                         </div>
                     )}
+
+                    <button
+                        style={mainBtnStyle}
+                        onClick={isRegistering ? handleRegister : handleLogin}
+                    >
+                        {isRegistering ? 'INITIALIZE_IDENTITY' : 'CONNECT'}
+                    </button>
+
+                    <p style={switchStyle} onClick={() => setIsRegistering(!isRegistering)}>
+                        {isRegistering ? 'ALREADY REGISTERED? LOGIN' : 'NEW USER? JOIN THE VOID'}
+                    </p>
                 </div>
             </div>
-
-            {/* Простая анимация появления */}
-            <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
         </div>
     );
-}
+};
+
+// --- СТИЛИ (ПОЛНОСТЬЮ ОБНОВЛЕНЫ) ---
+const containerStyle: React.CSSProperties = {
+    padding: '40px',
+    background: '#000',
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    fontFamily: '"Inter", sans-serif'
+};
+
+const headerArea: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: '1000px',
+    marginBottom: '30px'
+};
+
+const logoStyle: React.CSSProperties = {
+    fontSize: '14px',
+    letterSpacing: '5px',
+    color: '#22d3ee',
+    fontWeight: '900'
+};
+
+const logoutBtn: React.CSSProperties = {
+    background: 'transparent',
+    border: '1px solid #1a1a1a',
+    color: '#333',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '10px',
+    fontWeight: 'bold',
+    transition: '0.3s'
+};
+
+const authContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100vh',
+    background: '#000',
+    color: '#fff',
+    fontFamily: '"Inter", sans-serif'
+};
+
+const authCardStyle: React.CSSProperties = {
+    width: '100%',
+    maxWidth: '400px',
+    textAlign: 'center',
+    padding: '20px'
+};
+
+const authTitleStyle: React.CSSProperties = {
+    fontSize: '40px',
+    color: '#22d3ee',
+    fontWeight: '900',
+    letterSpacing: '-1.5px',
+    marginBottom: '10px'
+};
+
+const authSubtitleStyle: React.CSSProperties = {
+    fontSize: '12px',
+    color: '#444',
+    letterSpacing: '3px',
+    fontWeight: 'bold',
+    marginBottom: '50px'
+};
+
+const formStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '15px'
+};
+
+const inputStyle: React.CSSProperties = {
+    background: '#080808',
+    border: '1px solid #1a1a1a',
+    padding: '18px',
+    borderRadius: '14px',
+    color: '#22d3ee',
+    fontSize: '15px',
+    outline: 'none',
+    fontWeight: 'bold',
+    transition: '0.2s'
+};
+
+const mainBtnStyle: React.CSSProperties = {
+    background: '#22d3ee',
+    color: '#000',
+    border: 'none',
+    padding: '20px',
+    borderRadius: '14px',
+    cursor: 'pointer',
+    fontWeight: '900',
+    fontSize: '14px',
+    marginTop: '15px',
+    letterSpacing: '1px'
+};
+
+const switchStyle: React.CSSProperties = {
+    fontSize: '11px',
+    color: '#444',
+    cursor: 'pointer',
+    marginTop: '25px',
+    fontWeight: 'bold',
+    letterSpacing: '1px'
+};
+
+export default App;

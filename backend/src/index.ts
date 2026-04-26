@@ -8,154 +8,142 @@ import { Server } from 'socket.io';
 const app = express();
 const httpServer = createServer(app);
 const prisma = new PrismaClient();
-
-const io = new Server(httpServer, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+const io = new Server(httpServer, { cors: { origin: "*" } });
 
 app.use(cors());
 app.use(express.json());
 
-// Хранилище: имя_пользователя -> Set из socket.id (для нескольких вкладок)
 const onlineUsers = new Map<string, Set<string>>();
 
 io.on('connection', (socket) => {
     socket.on('join', async (username: string) => {
         if (!username) return;
-
-        // Добавляем текущий сокет в список сокетов пользователя
-        if (!onlineUsers.has(username)) {
-            onlineUsers.set(username, new Set());
-        }
+        if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
         onlineUsers.get(username)?.add(socket.id);
-
-        console.log(`[Socket] ${username} подключился (всего вкладок: ${onlineUsers.get(username)?.size})`);
 
         try {
             const user = await prisma.user.findUnique({ where: { username } });
             if (user) {
-                // Загружаем сообщения и подтягиваем данные об отправителе
-                const pending = await (prisma as any).message.findMany({
+                // Извлекаем сообщения, которые накопились пока юзер был оффлайн
+                const pending = await prisma.message.findMany({
                     where: { receiverId: user.id },
-                    include: { sender: true }, // Ключевое исправление
+                    include: { sender: true },
                     orderBy: { createdAt: 'asc' }
                 });
 
                 if (pending.length > 0) {
-                    // Форматируем для фронтенда
-                    const formatted = pending.map((m: any) => ({
+                    const formatted = pending.map(m => ({
                         sender: m.sender.username,
                         content: m.content,
+                        avatar: m.sender.avatar,
+                        nickname: m.sender.nickname,
                         createdAt: m.createdAt
                     }));
-
                     socket.emit('offline_messages', formatted);
 
-                    // Удаляем доставленные сообщения
-                    await (prisma as any).message.deleteMany({ where: { receiverId: user.id } });
-                    console.log(`[Socket] Доставлено ${pending.length} оффлайн-сообщений для ${username}`);
+                    // БЕЗОПАСНОЕ УДАЛЕНИЕ: Сообщения доставлены, стираем их из БД
+                    await prisma.message.deleteMany({ where: { receiverId: user.id } });
                 }
             }
-        } catch (err) {
-            console.error("Ошибка при входе в сокет:", err);
-        }
+        } catch (err) { console.error("Join error:", err); }
     });
 
     socket.on('send_message', async (data: { sender: string, receiver: string, content: string }) => {
         const { sender, receiver, content } = data;
-        const recipientSockets = onlineUsers.get(receiver);
+        const sUser = await prisma.user.findUnique({ where: { username: sender } });
+        const rUser = await prisma.user.findUnique({ where: { username: receiver } });
 
-        if (recipientSockets && recipientSockets.size > 0) {
-            // Если пользователь в сети, отправляем во ВСЕ его вкладки
-            recipientSockets.forEach(socketId => {
-                io.to(socketId).emit('new_message', {
-                    sender,
-                    content,
-                    createdAt: new Date()
-                });
-            });
-            console.log(`[Socket] Сообщение от ${sender} для ${receiver} отправлено онлайн`);
-        } else {
-            // Оффлайн сохранение
-            try {
-                const sUser = await prisma.user.findUnique({ where: { username: sender } });
-                const rUser = await prisma.user.findUnique({ where: { username: receiver } });
+        if (sUser && rUser) {
+            const recipientSockets = onlineUsers.get(receiver);
 
-                if (sUser && rUser) {
-                    await (prisma as any).message.create({
-                        data: {
-                            content,
-                            senderId: sUser.id,
-                            receiverId: rUser.id
-                        }
+            // Если получатель в сети — доставляем мгновенно через сокет
+            if (recipientSockets && recipientSockets.size > 0) {
+                recipientSockets.forEach(id => {
+                    io.to(id).emit('new_message', {
+                        sender,
+                        content,
+                        avatar: sUser.avatar,
+                        nickname: sUser.nickname,
+                        createdAt: new Date()
                     });
-                    console.log(`[Socket] Пользователь ${receiver} оффлайн. Сообщение сохранено в БД.`);
-                }
-            } catch (err) {
-                console.error("Ошибка сохранения оффлайн-сообщения:", err);
+                });
+            } else {
+                // Если оффлайн — сохраняем зашифрованный пакет в БД до востребования
+                await prisma.message.create({
+                    data: { content, senderId: sUser.id, receiverId: rUser.id }
+                });
             }
         }
     });
 
     socket.on('disconnect', () => {
-        // Находим и удаляем именно этот socket.id из списка вкладок пользователя
-        for (let [username, sockets] of onlineUsers.entries()) {
+        onlineUsers.forEach((sockets, user) => {
             if (sockets.has(socket.id)) {
                 sockets.delete(socket.id);
-                console.log(`[Socket] Одна вкладка пользователя ${username} закрыта`);
-
-                // Если вкладок больше нет, удаляем пользователя из Map
-                if (sockets.size === 0) {
-                    onlineUsers.delete(username);
-                    console.log(`[Socket] ${username} полностью покинул сеть`);
-                }
-                break;
+                if (sockets.size === 0) onlineUsers.delete(user);
             }
-        }
+        });
     });
 });
 
-// Регистрация
-app.post('/api/auth/register', async (req, res) => {
+// API для получения ключей
+app.get('/api/users/key/:username', async (req, res) => {
     try {
-        const { username, password, gender, age, location, publicKey } = req.body;
-
-        if (!username || !password) {
-            return res.status(400).json({ error: 'Нужны логин и пароль' });
-        }
-
-        const existing = await prisma.user.findUnique({ where: { username } });
-        if (existing) return res.status(400).json({ error: 'Ник занят' });
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const newUser = await prisma.user.create({
-            data: {
-                username,
-                passwordHash: hashedPassword,
-                publicKey: publicKey || "",
-                gender: gender || "не указан",
-                age: Number(age) || 0,
-                location: location || "не указано",
-                bio: ""
-            }
+        const user = await prisma.user.findUnique({
+            where: { username: req.params.username },
+            select: { publicKey: true }
         });
-
-        res.status(201).json({ message: 'Успех!', username: newUser.username });
-    } catch (error) {
-        console.error("Ошибка регистрации:", error);
-        res.status(500).json({ error: 'Ошибка сервера' });
-    }
+        res.json({ publicKey: user?.publicKey });
+    } catch { res.status(500).json({ error: "KEY_FETCH_ERROR" }); }
 });
 
-app.get('/', (req, res) => {
-    res.send('Бэкенд Hush работает!');
+// Поиск (для начала нового диалога)
+app.get('/api/users/search', async (req, res) => {
+    const users = await prisma.user.findMany({
+        where: {
+            OR: [
+                { username: { contains: String(req.query.query) } },
+                { nickname: { contains: String(req.query.query) } }
+            ],
+            NOT: { username: String(req.query.me) } // Не искать самого себя
+        },
+        take: 10,
+        select: { username: true, nickname: true, avatar: true, bio: true }
+    });
+    res.json(users);
+});
+
+// Обновление профиля
+app.patch('/api/users/update', async (req, res) => {
+    const { username, avatar, publicKey, nickname, bio } = req.body;
+    try {
+        const updated = await prisma.user.update({
+            where: { username },
+            data: { avatar, publicKey, nickname, bio }
+        });
+        res.json(updated);
+    } catch { res.status(500).json({ error: "UPDATE_ERROR" }); }
+});
+
+// Auth
+app.post('/api/auth/register', async (req, res) => {
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    try {
+        const newUser = await prisma.user.create({
+            data: { username, passwordHash: hashedPassword, gender: "none", age: 0, location: "none" }
+        });
+        res.status(201).json(newUser);
+    } catch { res.status(400).json({ error: "USER_EXISTS" }); }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    const user = await prisma.user.findUnique({ where: { username: req.body.username } });
+    if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
+        return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+    }
+    res.json({ username: user.username, nickname: user.nickname, bio: user.bio, photo: user.avatar });
 });
 
 const PORT = 3001;
-httpServer.listen(PORT, () => {
-    console.log(`🚀 Сервер запущен на порту ${PORT}`);
-});
+httpServer.listen(PORT, () => console.log(`🚀 HUSH_SERVER_RUNNING: ${PORT}`));
