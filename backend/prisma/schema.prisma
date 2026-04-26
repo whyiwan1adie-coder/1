@@ -7,21 +7,37 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+enum Location {
+  не_указано
+  россия
+  европа
+  азия
+  америка
+  африка
+  океания
+}
+
 model User {
-  id           String   @id @default(uuid())
-  username     String   @unique
-  passwordHash String
-  publicKey    String?  
-  avatar       String?  // Фото профиля
-  nickname     String?  // Публичный позывной
-  bio          String?  // Описание или статус профиля
-  gender       String   @default("не указан")
-  age          Int      @default(0)
-  location     String   @default("не указано")
-  createdAt    DateTime @default(now())
+  id            String   @id @default(uuid())
+  username      String   @unique
+  passwordHash  String
+  accessKeyHash String?
+  publicKey     String?
+  avatar        String?
+  nickname      String?
+  bio           String?
+  gender        String   @default("не указан")
+  age           Int      @default(0)
+  location      Location @default(не_указано)
+  languages     String   @default("")
+  status        String   @default("offline")
+  createdAt     DateTime @default(now())
 
   receivedMessages Message[] @relation("ReceiverRelation")
   sentMessages     Message[] @relation("SenderRelation")
+  sentRequests     Friendship[] @relation("FromUserRelation")
+  receivedRequests Friendship[] @relation("ToUserRelation")
+  wallPosts        WallPost[]
 }
 
 model Message {
@@ -33,4 +49,26 @@ model Message {
 
   sender      User     @relation("SenderRelation", fields: [senderId], references: [id])
   receiver    User     @relation("ReceiverRelation", fields: [receiverId], references: [id])
+}
+
+model Friendship {
+  id         String   @id @default(uuid())
+  fromUserId String
+  toUserId   String
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+
+  fromUser   User     @relation("FromUserRelation", fields: [fromUserId], references: [id])
+  toUser     User     @relation("ToUserRelation", fields: [toUserId], references: [id])
+}
+
+model WallPost {
+  id        String   @id @default(uuid())
+  text      String
+  image     String?
+  audio     String?
+  createdAt DateTime @default(now())
+  userId    String
+
+  user      User     @relation(fields: [userId], references: [id])
 }
