@@ -1,0 +1,48 @@
+# IDE файлы
+.vs/
+.vscode/
+*.sln
+*.suo
+*.user
+*.userosscache
+*.slnx
+
+# Зависимости
+node_modules/
+
+# Сборка
+dist/
+build/
+
+# Окружение
+.env
+node_# Зависимости (самое важное!)
+node_modules/
+jspm_packages/
+
+# Сборка
+dist/
+build/
+.next/
+out/
+
+# Логи и кэш
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+
+# Переменные окружения (секреты)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Prisma
+/generated/prisma
+/prisma/*.db
+/prisma/*.db-journal
+
+# Системные файлы
+.DS_Store
+Thumbs.db
