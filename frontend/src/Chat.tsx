@@ -1,6 +1,29 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
+// --- ИНТЕРФЕЙСЫ ---
+interface Message {
+    sender: string;
+    content: string;
+    avatar?: string;
+    nickname?: string;
+    createdAt: string;
+}
+
+interface SessionItem {
+    username: string;
+    nickname?: string;
+    avatar?: string;
+    lastTime: string;
+}
+
+interface User {
+    username: string;
+    nickname?: string;
+    avatar?: string;
+    publicKey?: string;
+}
+
 // --- ADVANCED HYBRID CRYPTO (RSA-OAEP + AES-GCM) ---
 const CryptoHelper = {
     async createNewKeys() {
@@ -45,9 +68,6 @@ const CryptoHelper = {
     }
 };
 
-interface Message { sender: string; content: string; avatar?: string; nickname?: string; createdAt: string; }
-interface SessionItem { username: string; nickname?: string; avatar?: string; lastTime: string; }
-
 const socket: Socket = io('http://127.0.0.1:3001');
 
 export const Chat = ({ username }: { username: string }) => {
@@ -55,36 +75,36 @@ export const Chat = ({ username }: { username: string }) => {
     const [message, setMessage] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
     const [sessions, setSessions] = useState<SessionItem[]>([]);
-    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [searchResults, setSearchResults] = useState<User[]>([]);
     const [myPrivateKey, setMyPrivateKey] = useState<CryptoKey | null>(null);
     const [myAvatar, setMyAvatar] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
     // --- ARCHIVE LOGIC ---
-    const loadArchive = useCallback(() => {
-        const archive = JSON.parse(localStorage.getItem(`hush_arc_${username}`) || "[]");
-        setMessages(archive);
-        buildSessions(archive);
-    }, [username]);
-
-    const buildSessions = (msgs: Message[]) => {
-        const map = new Map();
+    const buildSessions = useCallback((msgs: Message[]) => {
+        const map = new Map<string, SessionItem>();
         msgs.forEach(m => {
             const partner = m.sender === 'ME' ? (recipient || '...') : m.sender;
             if (partner === 'ME' || partner === '...') return;
             map.set(partner, { username: partner, nickname: m.nickname, avatar: m.avatar, lastTime: m.createdAt });
         });
         setSessions(Array.from(map.values()).sort((a, b) => b.lastTime.localeCompare(a.lastTime)));
-    };
+    }, [recipient]);
+
+    const loadArchive = useCallback(() => {
+        const archive: Message[] = JSON.parse(localStorage.getItem(`hush_arc_${username}`) || "[]");
+        setMessages(archive);
+        buildSessions(archive);
+    }, [username, buildSessions]);
 
     const addToArchive = useCallback((msg: Message) => {
-        const archive = JSON.parse(localStorage.getItem(`hush_arc_${username}`) || "[]");
-        if (archive.some((m: any) => m.createdAt === msg.createdAt && m.sender === msg.sender)) return;
+        const archive: Message[] = JSON.parse(localStorage.getItem(`hush_arc_${username}`) || "[]");
+        if (archive.some((m: Message) => m.createdAt === msg.createdAt && m.sender === msg.sender)) return;
         const newArchive = [...archive, msg];
         localStorage.setItem(`hush_arc_${username}`, JSON.stringify(newArchive));
         setMessages(newArchive);
         buildSessions(newArchive);
-    }, [username, recipient]);
+    }, [username, buildSessions]);
 
     // --- INITIALIZE ---
     useEffect(() => {
@@ -122,11 +142,11 @@ export const Chat = ({ username }: { username: string }) => {
         if (!recipient || !message) return;
         try {
             const res = await fetch(`http://localhost:3001/api/users/key/${recipient}`);
-            const data = await res.json();
+            const data: User = await res.json();
             if (!data.publicKey) return alert("System: Public key missing.");
 
             const encrypted = await CryptoHelper.encryptHybrid(message, data.publicKey);
-            const myMsg = { sender: 'ME', content: message, createdAt: new Date().toISOString() };
+            const myMsg: Message = { sender: 'ME', content: message, createdAt: new Date().toISOString() };
 
             socket.emit('send_message', { sender: username, receiver: recipient, content: encrypted });
             addToArchive(myMsg);
@@ -175,11 +195,19 @@ export const Chat = ({ username }: { username: string }) => {
                 <div style={searchWrapperStyle}>
                     <input placeholder="SEARCH_ID..." value={recipient} onChange={e => {
                         setRecipient(e.target.value);
-                        if (e.target.value.length > 1) fetch(`http://localhost:3001/api/users/search?query=${e.target.value}&me=${username}`).then(r => r.json()).then(setSearchResults);
+                        if (e.target.value.length > 1) {
+                            fetch(`http://localhost:3001/api/users/search?query=${e.target.value}&me=${username}`)
+                                .then(r => r.json())
+                                .then((data: User[]) => setSearchResults(data));
+                        }
                     }} style={inputRecipientStyle} />
                     {searchResults.length > 0 && (
                         <div style={dropdownStyle}>
-                            {searchResults.map(u => <div key={u.username} style={resItemStyle} onClick={() => { setRecipient(u.username); setSearchResults([]); }}>{u.nickname || u.username} (@{u.username})</div>)}
+                            {searchResults.map(u => (
+                                <div key={u.username} style={resItemStyle} onClick={() => { setRecipient(u.username); setSearchResults([]); }}>
+                                    {u.nickname || u.username} (@{u.username})
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -215,7 +243,7 @@ export const Chat = ({ username }: { username: string }) => {
     );
 };
 
-// --- STYLES (ENLARGED & NEON) ---
+// --- STYLES ---
 const mainLayoutStyle: React.CSSProperties = { display: 'flex', height: '680px', width: '1000px', margin: '0 auto', background: '#000', border: '1px solid #1a1a1a', borderRadius: '24px', overflow: 'hidden', color: '#fff', fontFamily: 'Inter, sans-serif' };
 const sidebarStyle: React.CSSProperties = { width: '280px', borderRight: '1px solid #1a1a1a', display: 'flex', flexDirection: 'column' };
 const profileAreaStyle: React.CSSProperties = { padding: '30px 20px', borderBottom: '1px solid #1a1a1a', textAlign: 'center' };

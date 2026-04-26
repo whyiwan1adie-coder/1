@@ -17,7 +17,6 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
     const [accessKey, setAccessKey] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Используем React.FormEvent — это стандартный современный тип
     const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsLoading(true);
@@ -51,6 +50,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
     const handleFinalStep = () => {
         if (!accessKey) return;
 
+        // ИСПРАВЛЕНО: Объект теперь полностью соответствует UserData в App.tsx
         const userData: UserData = {
             username: formData.username,
             login: formData.username,
@@ -64,6 +64,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
 
     return (
         <div className="min-h-screen w-full bg-[#020203] text-white overflow-hidden relative font-sans">
+            {/* Декоративные элементы */}
             <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-violet-600/20 blur-[120px]"></div>
             <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-600/10 blur-[120px]"></div>
 
@@ -122,6 +123,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister }) => {
                         <div className="p-6 bg-black rounded-3xl border border-white/10 font-mono text-cyan-400 break-all shadow-inner">
                             {accessKey}
                         </div>
+                        <p className="text-xs text-slate-500 uppercase">Сохрани его для доступа к сети</p>
                         <button
                             onClick={handleFinalStep}
                             className="w-full py-4 bg-white text-black font-bold rounded-2xl hover:bg-cyan-400 transition-colors uppercase tracking-widest"

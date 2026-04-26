@@ -1,16 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Chat } from './Chat';
 
-// Интерфейс данных пользователя для типизации
+// --- ЕДИНЫЙ ИНТЕРФЕЙС ДЛЯ ВСЕГО ПРОЕКТА ---
 export interface UserData {
     username: string;
     photo?: string;
     nickname?: string;
     bio?: string;
+    encryptionKey?: string;
+    login?: string;
+    hashPassword?: string;
 }
 
 const App: React.FC = () => {
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    // Инициализация состояния напрямую из localStorage (избегаем каскадных рендеров)
+    const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+        const session = localStorage.getItem('hush_session');
+        if (session) {
+            try {
+                const parsed = JSON.parse(session);
+                if (parsed && parsed.username) return true;
+                localStorage.removeItem('hush_session');
+            } catch {
+                localStorage.removeItem('hush_session');
+            }
+        }
+        return false;
+    });
+
     const [isRegistering, setIsRegistering] = useState(false);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -19,27 +36,6 @@ const App: React.FC = () => {
     const [gender, setGender] = useState('');
     const [age, setAge] = useState('');
     const [location, setLocation] = useState('');
-
-    // --- ЛОГИКА САМОВОССТАНОВЛЕНИЯ (Удаляет старый мусор из памяти) ---
-    useEffect(() => {
-        const session = localStorage.getItem('hush_session');
-        if (session) {
-            try {
-                const parsed = JSON.parse(session);
-                // Если сессия валидна и есть имя пользователя — пускаем
-                if (parsed && parsed.username) {
-                    setIsLoggedIn(true);
-                } else {
-                    // Если формат старый или битый — чистим
-                    localStorage.removeItem('hush_session');
-                }
-            } catch (e) {
-                console.error("Session corruption detected, clearing storage...");
-                localStorage.clear();
-                setIsLoggedIn(false);
-            }
-        }
-    }, []);
 
     const handleLogin = async () => {
         if (!username || !password) return alert('CREDENTIALS_REQUIRED');
@@ -83,12 +79,11 @@ const App: React.FC = () => {
         }
     };
 
-    // --- ЭКРАН ЧАТА ---
     if (isLoggedIn) {
         let userData: UserData = { username: '' };
         try {
             userData = JSON.parse(localStorage.getItem('hush_session') || '{}');
-        } catch (e) {
+        } catch {
             localStorage.clear();
             window.location.reload();
         }
@@ -106,7 +101,6 @@ const App: React.FC = () => {
         );
     }
 
-    // --- ЭКРАН ВХОДА / РЕГИСТРАЦИИ ---
     return (
         <div style={authContainerStyle}>
             <div style={authCardStyle}>
@@ -156,116 +150,18 @@ const App: React.FC = () => {
     );
 };
 
-// --- СТИЛИ (ПОЛНОСТЬЮ ОБНОВЛЕНЫ) ---
-const containerStyle: React.CSSProperties = {
-    padding: '40px',
-    background: '#000',
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    fontFamily: '"Inter", sans-serif'
-};
-
-const headerArea: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: '1000px',
-    marginBottom: '30px'
-};
-
-const logoStyle: React.CSSProperties = {
-    fontSize: '14px',
-    letterSpacing: '5px',
-    color: '#22d3ee',
-    fontWeight: '900'
-};
-
-const logoutBtn: React.CSSProperties = {
-    background: 'transparent',
-    border: '1px solid #1a1a1a',
-    color: '#333',
-    padding: '8px 16px',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '10px',
-    fontWeight: 'bold',
-    transition: '0.3s'
-};
-
-const authContainerStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '100vh',
-    background: '#000',
-    color: '#fff',
-    fontFamily: '"Inter", sans-serif'
-};
-
-const authCardStyle: React.CSSProperties = {
-    width: '100%',
-    maxWidth: '400px',
-    textAlign: 'center',
-    padding: '20px'
-};
-
-const authTitleStyle: React.CSSProperties = {
-    fontSize: '40px',
-    color: '#22d3ee',
-    fontWeight: '900',
-    letterSpacing: '-1.5px',
-    marginBottom: '10px'
-};
-
-const authSubtitleStyle: React.CSSProperties = {
-    fontSize: '12px',
-    color: '#444',
-    letterSpacing: '3px',
-    fontWeight: 'bold',
-    marginBottom: '50px'
-};
-
-const formStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '15px'
-};
-
-const inputStyle: React.CSSProperties = {
-    background: '#080808',
-    border: '1px solid #1a1a1a',
-    padding: '18px',
-    borderRadius: '14px',
-    color: '#22d3ee',
-    fontSize: '15px',
-    outline: 'none',
-    fontWeight: 'bold',
-    transition: '0.2s'
-};
-
-const mainBtnStyle: React.CSSProperties = {
-    background: '#22d3ee',
-    color: '#000',
-    border: 'none',
-    padding: '20px',
-    borderRadius: '14px',
-    cursor: 'pointer',
-    fontWeight: '900',
-    fontSize: '14px',
-    marginTop: '15px',
-    letterSpacing: '1px'
-};
-
-const switchStyle: React.CSSProperties = {
-    fontSize: '11px',
-    color: '#444',
-    cursor: 'pointer',
-    marginTop: '25px',
-    fontWeight: 'bold',
-    letterSpacing: '1px'
-};
+// --- STYLES ---
+const containerStyle: React.CSSProperties = { padding: '40px', background: '#000', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: '"Inter", sans-serif' };
+const headerArea: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', maxWidth: '1000px', marginBottom: '30px' };
+const logoStyle: React.CSSProperties = { fontSize: '14px', letterSpacing: '5px', color: '#22d3ee', fontWeight: '900' };
+const logoutBtn: React.CSSProperties = { background: 'transparent', border: '1px solid #1a1a1a', color: '#333', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold', transition: '0.3s' };
+const authContainerStyle: React.CSSProperties = { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#000', color: '#fff', fontFamily: '"Inter", sans-serif' };
+const authCardStyle: React.CSSProperties = { width: '100%', maxWidth: '400px', textAlign: 'center', padding: '20px' };
+const authTitleStyle: React.CSSProperties = { fontSize: '40px', color: '#22d3ee', fontWeight: '900', letterSpacing: '-1.5px', marginBottom: '10px' };
+const authSubtitleStyle: React.CSSProperties = { fontSize: '12px', color: '#444', letterSpacing: '3px', fontWeight: 'bold', marginBottom: '50px' };
+const formStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '15px' };
+const inputStyle: React.CSSProperties = { background: '#080808', border: '1px solid #1a1a1a', padding: '18px', borderRadius: '14px', color: '#22d3ee', fontSize: '15px', outline: 'none', fontWeight: 'bold' };
+const mainBtnStyle: React.CSSProperties = { background: '#22d3ee', color: '#000', border: 'none', padding: '20px', borderRadius: '14px', cursor: 'pointer', fontWeight: '900', fontSize: '14px', marginTop: '15px' };
+const switchStyle: React.CSSProperties = { fontSize: '11px', color: '#444', cursor: 'pointer', marginTop: '25px', fontWeight: 'bold' };
 
 export default App;
