@@ -31,13 +31,25 @@ model User {
   location      Location @default(не_указано)
   languages     String   @default("")
   status        String   @default("offline")
+  wallPrivacy   String   @default("all")
+  avatarPrivacy String   @default("all")
+  subscribePrivacy String @default("all")
+  subscriberCount Int    @default(0)
+  digitalGhost  Int      @default(0)
+  paranoiaLevel Int      @default(0)
+  attachmentType String  @default("")
   createdAt     DateTime @default(now())
 
-  receivedMessages Message[] @relation("ReceiverRelation")
-  sentMessages     Message[] @relation("SenderRelation")
-  sentRequests     Friendship[] @relation("FromUserRelation")
-  receivedRequests Friendship[] @relation("ToUserRelation")
-  wallPosts        WallPost[]
+  receivedMessages     Message[]      @relation("ReceiverRelation")
+  sentMessages         Message[]      @relation("SenderRelation")
+  sentRequests         Friendship[]   @relation("FromUserRelation")
+  receivedRequests     Friendship[]   @relation("ToUserRelation")
+  wallPosts            WallPost[]
+  comments             WallComment[]
+  sentNotifications    Notification[] @relation("FromNotifRelation")
+  receivedNotifications Notification[] @relation("ToNotifRelation")
+  votes                WallVote[]
+  reactions            Reaction[]
 }
 
 model Message {
@@ -67,8 +79,59 @@ model WallPost {
   text      String
   image     String?
   audio     String?
+  likes     Int      @default(0)
+  views     Int      @default(0)
   createdAt DateTime @default(now())
   userId    String
 
   user      User     @relation(fields: [userId], references: [id])
+  comments  WallComment[]
+  votes     WallVote[]
+  reactions Reaction[]
+}
+
+model WallComment {
+  id        String   @id @default(uuid())
+  text      String
+  audio     String?
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+
+  post      WallPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  type      String
+  text      String
+  postId    String?
+  fromUserId String?
+  toUserId  String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  fromUser  User?    @relation("FromNotifRelation", fields: [fromUserId], references: [id])
+  toUser    User     @relation("ToNotifRelation", fields: [toUserId], references: [id])
+}
+
+model WallVote {
+  id     String @id @default(uuid())
+  postId String
+  userId String
+  type   String
+
+  post   WallPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id])
+}
+
+model Reaction {
+  id     String @id @default(uuid())
+  postId String
+  userId String
+  emoji  String
+
+  post   WallPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id])
 }

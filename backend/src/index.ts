@@ -17,325 +17,55 @@ app.use(express.json({ limit: '50mb' }));
 const onlineUsers = new Map<string, Set<string>>();
 
 io.on('connection', (socket) => {
-    socket.on('join', async (username: string) => {
-        if (!username) return;
-        if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
-        onlineUsers.get(username)?.add(socket.id);
-
-        try {
-            const user = await prisma.user.findUnique({ where: { username } });
-            if (user) {
-                const pending = await prisma.message.findMany({
-                    where: { receiverId: user.id },
-                    include: { sender: true },
-                    orderBy: { createdAt: 'asc' }
-                });
-
-                if (pending.length > 0) {
-                    const formatted = pending.map(m => ({
-                        sender: m.sender.username,
-                        content: m.content,
-                        avatar: m.sender.avatar,
-                        nickname: m.sender.nickname,
-                        createdAt: m.createdAt
-                    }));
-                    socket.emit('offline_messages', formatted);
-                    await prisma.message.deleteMany({ where: { receiverId: user.id } });
-                }
-            }
-        } catch (err) { console.error("Join error:", err); }
-    });
-
-    socket.on('send_message', async (data: { sender: string, receiver: string, content: string }) => {
-        const { sender, receiver, content } = data;
-        const sUser = await prisma.user.findUnique({ where: { username: sender } });
-        const rUser = await prisma.user.findUnique({ where: { username: receiver } });
-
-        if (sUser && rUser) {
-            const recipientSockets = onlineUsers.get(receiver);
-
-            if (recipientSockets && recipientSockets.size > 0) {
-                recipientSockets.forEach(id => {
-                    io.to(id).emit('new_message', {
-                        sender,
-                        content,
-                        avatar: sUser.avatar,
-                        nickname: sUser.nickname,
-                        createdAt: new Date()
-                    });
-                });
-            } else {
-                await prisma.message.create({
-                    data: { content, senderId: sUser.id, receiverId: rUser.id }
-                });
-            }
-        }
-    });
-
-    socket.on('disconnect', () => {
-        onlineUsers.forEach((sockets, user) => {
-            if (sockets.has(socket.id)) {
-                sockets.delete(socket.id);
-                if (sockets.size === 0) onlineUsers.delete(user);
-            }
-        });
-    });
+    socket.on('join', async (username: string) => { if (!username) return; if (!onlineUsers.has(username)) onlineUsers.set(username, new Set()); onlineUsers.get(username)?.add(socket.id); try { const user = await prisma.user.findUnique({ where: { username } }); if (user) { const pending = await prisma.message.findMany({ where: { receiverId: user.id }, include: { sender: true }, orderBy: { createdAt: 'asc' } }); if (pending.length > 0) { socket.emit('offline_messages', pending.map(m => ({ sender: m.sender.username, content: m.content, avatar: m.sender.avatar, nickname: m.sender.nickname, createdAt: m.createdAt }))); await prisma.message.deleteMany({ where: { receiverId: user.id } }); } } } catch (err) { console.error("Join error:", err); } });
+    socket.on('send_message', async (data: { sender: string, receiver: string, content: string }) => { const { sender, receiver, content } = data; const sUser = await prisma.user.findUnique({ where: { username: sender } }); const rUser = await prisma.user.findUnique({ where: { username: receiver } }); if (sUser && rUser) { const recipientSockets = onlineUsers.get(receiver); if (recipientSockets && recipientSockets.size > 0) { recipientSockets.forEach(id => io.to(id).emit('new_message', { sender, content, avatar: sUser.avatar, nickname: sUser.nickname, createdAt: new Date() })); } else { await prisma.message.create({ data: { content, senderId: sUser.id, receiverId: rUser.id } }); } } });
+    socket.on('disconnect', () => { onlineUsers.forEach((sockets, user) => { if (sockets.has(socket.id)) { sockets.delete(socket.id); if (sockets.size === 0) onlineUsers.delete(user); } }); });
 });
 
-// ==================== USERS API ====================
-
-app.get('/api/users/key/:username', async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { username: req.params.username },
-            select: { publicKey: true }
-        });
-        res.json({ publicKey: user?.publicKey });
-    } catch { res.status(500).json({ error: "KEY_FETCH_ERROR" }); }
-});
-
-app.get('/api/users/search', async (req, res) => {
-    try {
-        const { query, location, language, status, minAge, maxAge, me } = req.query;
-        const where: any = {
-            NOT: { username: String(me || '') }
-        };
-
-        if (status) {
-            where.status = String(status);
-        } else {
-            where.status = { not: 'shadow' };
-        }
-
-        if (query) {
-            const searchQuery = String(query);
-            where.OR = [
-                { username: { contains: searchQuery } },
-                { nickname: { contains: searchQuery } }
-            ];
-        }
-
-        if (location && location !== 'не_указано') where.location = String(location);
-        if (language) where.languages = { contains: String(language) };
-        if (minAge || maxAge) {
-            where.age = {};
-            if (minAge) where.age.gte = Number(minAge);
-            if (maxAge) where.age.lte = Number(maxAge);
-        }
-
-        const users = await prisma.user.findMany({
-            where,
-            take: 20,
-            select: {
-                username: true,
-                nickname: true,
-                avatar: true,
-                bio: true,
-                age: true,
-                location: true,
-                languages: true,
-                status: true,
-                gender: true
-            }
-        });
-        res.json(users);
-    } catch (err) { console.error(err); res.status(500).json({ error: "SEARCH_ERROR" }); }
-});
+app.get('/api/users/search', async (req, res) => { try { const { query, location, language, status, minAge, maxAge, me } = req.query; const where: any = { NOT: { username: String(me || '') } }; if (status) where.status = String(status); else where.status = { not: 'shadow' }; if (query) { const q = String(query); where.OR = [{ nickname: { contains: q } }]; } if (location && location !== 'не_указано') where.location = String(location); if (language) where.languages = { contains: String(language) }; if (minAge || maxAge) { where.age = {}; if (minAge) where.age.gte = Number(minAge); if (maxAge) where.age.lte = Number(maxAge); } const users = await prisma.user.findMany({ where, take: 20, select: { username: true, nickname: true, avatar: true, bio: true, age: true, location: true, languages: true, status: true, gender: true } }); res.json(users); } catch (err) { console.error(err); res.status(500).json({ error: "SEARCH_ERROR" }); } });
+app.get('/api/users/key/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username }, select: { publicKey: true } }); res.json({ publicKey: u?.publicKey }); } catch { res.status(500).json({ error: "KEY_FETCH_ERROR" }); } });
+app.get('/api/users/:username', async (req, res) => { try { const user = await prisma.user.findUnique({ where: { username: req.params.username }, select: { username: true, nickname: true, avatar: true, bio: true, age: true, location: true, languages: true, status: true, gender: true, digitalGhost: true, paranoiaLevel: true, attachmentType: true } }); if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" }); res.json(user); } catch { res.status(500).json({ error: "USER_ERROR" }); } });
 
 app.patch('/api/users/update', async (req, res) => {
-    const { username, avatar, publicKey, nickname, bio, age, location, languages, status } = req.body;
+    const { username, avatar, publicKey, nickname, bio, age, location, languages, status, wallPrivacy, subscribePrivacy, digitalGhost, paranoiaLevel, attachmentType } = req.body;
     try {
+        if (nickname) { const existing = await prisma.user.findFirst({ where: { nickname, NOT: { username } } }); if (existing) return res.status(400).json({ error: "NICKNAME_TAKEN" }); }
         const data: any = {};
-        if (avatar !== undefined) data.avatar = avatar;
-        if (publicKey !== undefined) data.publicKey = publicKey;
-        if (nickname !== undefined) data.nickname = nickname;
-        if (bio !== undefined) data.bio = bio;
-        if (age !== undefined) data.age = age;
-        if (location !== undefined) data.location = location;
-        if (languages !== undefined) data.languages = languages;
-        if (status !== undefined) data.status = status;
-
+        if (avatar !== undefined) data.avatar = avatar; if (publicKey !== undefined) data.publicKey = publicKey;
+        if (nickname !== undefined) data.nickname = nickname; if (bio !== undefined) data.bio = bio;
+        if (age !== undefined) data.age = age; if (location !== undefined) data.location = location;
+        if (languages !== undefined) data.languages = languages; if (status !== undefined) data.status = status;
+        if (wallPrivacy !== undefined) data.wallPrivacy = wallPrivacy;
+        if (subscribePrivacy !== undefined) data.subscribePrivacy = subscribePrivacy;
+        if (digitalGhost !== undefined) data.digitalGhost = digitalGhost;
+        if (paranoiaLevel !== undefined) data.paranoiaLevel = paranoiaLevel;
+        if (attachmentType !== undefined) data.attachmentType = attachmentType;
         const updated = await prisma.user.update({ where: { username }, data });
         res.json(updated);
     } catch (err) { console.error(err); res.status(500).json({ error: "UPDATE_ERROR" }); }
 });
 
-// ==================== FRIENDS API ====================
-
-app.post('/api/friends/request', async (req, res) => {
-    const { from, to } = req.body;
-    try {
-        const fromUser = await prisma.user.findUnique({ where: { username: from } });
-        const toUser = await prisma.user.findUnique({ where: { username: to } });
-        if (!fromUser || !toUser) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        const existing = await prisma.friendship.findFirst({
-            where: {
-                OR: [
-                    { fromUserId: fromUser.id, toUserId: toUser.id },
-                    { fromUserId: toUser.id, toUserId: fromUser.id }
-                ]
-            }
-        });
-        if (existing) return res.status(400).json({ error: "REQUEST_ALREADY_EXISTS" });
-
-        const friendship = await prisma.friendship.create({
-            data: { fromUserId: fromUser.id, toUserId: toUser.id }
-        });
-        res.status(201).json(friendship);
-    } catch (err) { console.error(err); res.status(500).json({ error: "REQUEST_ERROR" }); }
-});
-
-app.post('/api/friends/accept', async (req, res) => {
-    const { id } = req.body;
-    try {
-        const friendship = await prisma.friendship.update({
-            where: { id },
-            data: { status: 'accepted' }
-        });
-        res.json(friendship);
-    } catch (err) { console.error(err); res.status(500).json({ error: "ACCEPT_ERROR" }); }
-});
-
-app.post('/api/friends/reject', async (req, res) => {
-    const { id } = req.body;
-    try {
-        await prisma.friendship.delete({ where: { id } });
-        res.json({ success: true });
-    } catch (err) { console.error(err); res.status(500).json({ error: "REJECT_ERROR" }); }
-});
-
-app.get('/api/friends/incoming/:username', async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({ where: { username: req.params.username } });
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        const requests = await prisma.friendship.findMany({
-            where: { toUserId: user.id, status: 'pending' },
-            include: { fromUser: { select: { username: true, nickname: true, avatar: true } } }
-        });
-        res.json(requests);
-    } catch (err) { console.error(err); res.status(500).json({ error: "INCOMING_ERROR" }); }
-});
-
-app.get('/api/friends/list/:username', async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({ where: { username: req.params.username } });
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        const friendships = await prisma.friendship.findMany({
-            where: {
-                status: 'accepted',
-                OR: [{ fromUserId: user.id }, { toUserId: user.id }]
-            },
-            include: {
-                fromUser: { select: { username: true, nickname: true, avatar: true, status: true } },
-                toUser: { select: { username: true, nickname: true, avatar: true, status: true } }
-            }
-        });
-
-        const seen = new Set<string>();
-        const friends: { username: string; nickname: string | null; avatar: string | null; status: string | null }[] = [];
-
-        friendships.forEach(f => {
-            const friend = f.fromUserId === user.id ? f.toUser : f.fromUser;
-            if (!seen.has(friend.username)) {
-                seen.add(friend.username);
-                friends.push(friend);
-            }
-        });
-
-        res.json(friends);
-    } catch (err) { console.error(err); res.status(500).json({ error: "LIST_ERROR" }); }
-});
-
-// ==================== WALL API ====================
-
-app.get('/api/wall/:username', async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({ where: { username: req.params.username } });
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        const posts = await prisma.wallPost.findMany({
-            where: { userId: user.id },
-            orderBy: { createdAt: 'desc' },
-            take: 50
-        });
-        res.json(posts);
-    } catch (err) { console.error(err); res.status(500).json({ error: "WALL_ERROR" }); }
-});
-
-app.post('/api/wall/:username', async (req, res) => {
-    const { text, image, audio } = req.body;
-    try {
-        const user = await prisma.user.findUnique({ where: { username: req.params.username } });
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        const post = await prisma.wallPost.create({
-            data: { text: text || '', image, audio, userId: user.id }
-        });
-        res.status(201).json(post);
-    } catch (err) { console.error(err); res.status(500).json({ error: "CREATE_ERROR" }); }
-});
-
-app.delete('/api/wall/post/:id', async (req, res) => {
-    try {
-        await prisma.wallPost.delete({ where: { id: req.params.id } });
-        res.json({ success: true });
-    } catch (err) { console.error(err); res.status(500).json({ error: "DELETE_ERROR" }); }
-});
-
-// ==================== AUTH ====================
-
-app.post('/api/auth/register', async (req, res) => {
-    const { username, password, gender, age, location } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const accessKey = crypto.randomBytes(16).toString('hex');
-    const accessKeyHash = await bcrypt.hash(accessKey, 10);
-
-    try {
-        const newUser = await prisma.user.create({
-            data: {
-                username,
-                passwordHash: hashedPassword,
-                accessKeyHash,
-                gender: gender || "не указан",
-                age: age || 0,
-                location: location || "не_указано"
-            }
-        });
-        res.status(201).json({
-            username: newUser.username,
-            accessKey,
-            message: "ACCESS_KEY_SHOWN_ONCE_SAVE_IT"
-        });
-    } catch (err) { console.error(err); res.status(400).json({ error: "USER_EXISTS" }); }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-    const user = await prisma.user.findUnique({ where: { username: req.body.username } });
-    if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
-        return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
-    }
-    res.json({
-        username: user.username, nickname: user.nickname, bio: user.bio,
-        photo: user.avatar, status: user.status, location: user.location,
-        languages: user.languages, age: user.age, gender: user.gender
-    });
-});
-
-app.post('/api/auth/login-with-key', async (req, res) => {
-    const { username, accessKey } = req.body;
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user || !user.accessKeyHash) return res.status(401).json({ error: 'ACCOUNT_NOT_FOUND' });
-    const valid = await bcrypt.compare(accessKey, user.accessKeyHash);
-    if (!valid) return res.status(401).json({ error: 'INVALID_ACCESS_KEY' });
-    res.json({
-        username: user.username, nickname: user.nickname, bio: user.bio,
-        photo: user.avatar, status: user.status, location: user.location,
-        languages: user.languages, age: user.age, gender: user.gender
-    });
-});
+app.post('/api/friends/request', async (req, res) => { const { from, to } = req.body; try { const fromUser = await prisma.user.findUnique({ where: { username: from } }); const toUser = await prisma.user.findUnique({ where: { username: to } }); if (!fromUser || !toUser) return res.status(404).json({ error: "USER_NOT_FOUND" }); if (toUser.subscribePrivacy === 'nobody') return res.status(403).json({ error: "SUBSCRIBE_NOT_ALLOWED" }); const existing = await prisma.friendship.findFirst({ where: { OR: [{ fromUserId: fromUser.id, toUserId: toUser.id }, { fromUserId: toUser.id, toUserId: fromUser.id }] } }); if (existing) return res.status(400).json({ error: "REQUEST_ALREADY_EXISTS" }); await prisma.user.update({ where: { id: toUser.id }, data: { subscriberCount: { increment: 1 } } }); const friendship = await prisma.friendship.create({ data: { fromUserId: fromUser.id, toUserId: toUser.id, status: 'subscribed' } }); res.status(201).json(friendship); } catch (err) { console.error(err); res.status(500).json({ error: "REQUEST_ERROR" }); } });
+app.post('/api/friends/accept', async (req, res) => { try { const f = await prisma.friendship.findUnique({ where: { id: req.body.id } }); if (!f) return res.status(404).json({ error: "NOT_FOUND" }); const m = await prisma.friendship.findFirst({ where: { fromUserId: f.toUserId, toUserId: f.fromUserId, status: 'subscribed' } }); if (m) { await prisma.friendship.update({ where: { id: req.body.id }, data: { status: 'accepted' } }); await prisma.friendship.update({ where: { id: m.id }, data: { status: 'accepted' } }); } else { await prisma.friendship.update({ where: { id: req.body.id }, data: { status: 'accepted' } }); } res.json({ success: true }); } catch (err) { console.error(err); res.status(500).json({ error: "ACCEPT_ERROR" }); } });
+app.post('/api/friends/reject', async (req, res) => { try { await prisma.friendship.delete({ where: { id: req.body.id } }); res.json({ success: true }); } catch (err) { console.error(err); res.status(500).json({ error: "REJECT_ERROR" }); } });
+app.get('/api/friends/incoming/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const r = await prisma.friendship.findMany({ where: { toUserId: u.id, status: 'subscribed' }, include: { fromUser: { select: { username: true, nickname: true, avatar: true } } } }); res.json(r); } catch (err) { console.error(err); res.status(500).json({ error: "INCOMING_ERROR" }); } });
+app.get('/api/friends/list/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const f = await prisma.friendship.findMany({ where: { status: 'accepted', OR: [{ fromUserId: u.id }, { toUserId: u.id }] }, include: { fromUser: { select: { username: true, nickname: true, avatar: true, status: true } }, toUser: { select: { username: true, nickname: true, avatar: true, status: true } } } }); const seen = new Set<string>(); const friends: any[] = []; f.forEach(x => { const friend = x.fromUserId === u.id ? x.toUser : x.fromUser; if (!seen.has(friend.username)) { seen.add(friend.username); friends.push(friend); } }); res.json(friends); } catch (err) { console.error(err); res.status(500).json({ error: "LIST_ERROR" }); } });
+app.get('/api/subscriptions/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const s = await prisma.friendship.findMany({ where: { fromUserId: u.id }, include: { toUser: { select: { username: true, nickname: true, avatar: true, status: true } } } }); res.json(s.map(x => x.toUser)); } catch (err) { console.error(err); res.status(500).json({ error: "SUBSCRIPTIONS_ERROR" }); } });
+app.get('/api/subscribers/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const s = await prisma.friendship.findMany({ where: { toUserId: u.id }, include: { fromUser: { select: { username: true, nickname: true, avatar: true, status: true } } } }); res.json(s.map(x => x.fromUser)); } catch (err) { console.error(err); res.status(500).json({ error: "SUBSCRIBERS_ERROR" }); } });
+app.get('/api/wall/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const p = await prisma.wallPost.findMany({ where: { userId: u.id }, orderBy: { createdAt: 'desc' }, take: 50 }); res.json(p); } catch (err) { console.error(err); res.status(500).json({ error: "WALL_ERROR" }); } });
+app.post('/api/wall/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const post = await prisma.wallPost.create({ data: { text: req.body.text || '', image: req.body.image, audio: req.body.audio, userId: u.id } }); if (req.body.from && req.body.from !== req.params.username) { await prisma.notification.create({ data: { type: 'wall_post', text: 'wrote on your wall', postId: post.id, fromUserId: (await prisma.user.findUnique({ where: { username: req.body.from } }))?.id, toUserId: u.id } }); } res.status(201).json(post); } catch (err) { console.error(err); res.status(500).json({ error: "CREATE_ERROR" }); } });
+app.delete('/api/wall/post/:id', async (req, res) => { try { await prisma.wallPost.delete({ where: { id: req.params.id } }); res.json({ success: true }); } catch (err) { console.error(err); res.status(500).json({ error: "DELETE_ERROR" }); } });
+app.get('/api/posts', async (req, res) => { try { const sort = req.query.sort === 'top' ? 'top' : 'new'; const posts = await prisma.wallPost.findMany({ where: { user: { status: { not: 'shadow' }, wallPrivacy: 'all' } }, include: { user: { select: { username: true, nickname: true, avatar: true } }, reactions: { select: { emoji: true, userId: true } } }, orderBy: sort === 'top' ? { likes: 'desc' } : { createdAt: 'desc' }, take: 50 }); res.json(posts); } catch (err) { console.error(err); res.status(500).json({ error: "POSTS_ERROR" }); } });
+app.post('/api/wall/vote/:id', async (req, res) => { const { from, type } = req.body; try { const u = await prisma.user.findUnique({ where: { username: from } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const existing = await prisma.wallVote.findFirst({ where: { postId: req.params.id, userId: u.id } }); if (existing) return res.status(400).json({ error: "ALREADY_VOTED" }); const inc = type === 'up' ? 1 : -1; await prisma.wallVote.create({ data: { postId: req.params.id, userId: u.id, type } }); const post = await (prisma.wallPost as any).update({ where: { id: req.params.id }, data: { likes: { increment: inc } } }); res.json({ likes: post.likes }); } catch (err) { console.error(err); res.status(500).json({ error: "VOTE_ERROR" }); } });
+app.post('/api/wall/react/:id', async (req, res) => { const { from, emoji } = req.body; try { const u = await prisma.user.findUnique({ where: { username: from } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const existing = await prisma.reaction.findFirst({ where: { postId: req.params.id, userId: u.id } }); if (existing) { await prisma.reaction.update({ where: { id: existing.id }, data: { emoji } }); } else { await prisma.reaction.create({ data: { postId: req.params.id, userId: u.id, emoji } }); } const reactions = await prisma.reaction.findMany({ where: { postId: req.params.id }, select: { emoji: true, userId: true } }); res.json(reactions); } catch (err) { console.error(err); res.status(500).json({ error: "REACT_ERROR" }); } });
+app.get('/api/wall/comments/:postId', async (req, res) => { try { const c = await prisma.wallComment.findMany({ where: { postId: req.params.postId }, include: { user: { select: { username: true, nickname: true, avatar: true, status: true } } }, orderBy: { createdAt: 'asc' } }); res.json(c); } catch (err) { console.error(err); res.status(500).json({ error: "COMMENTS_ERROR" }); } });
+app.post('/api/wall/comment/:postId', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.body.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const c = await prisma.wallComment.create({ data: { text: req.body.text || '', audio: req.body.audio, postId: req.params.postId, userId: u.id }, include: { user: { select: { username: true, nickname: true, avatar: true, status: true } } } }); const p = await prisma.wallPost.findUnique({ where: { id: req.params.postId } }); if (p && req.body.username !== (await prisma.user.findUnique({ where: { id: p.userId } }))?.username) { await prisma.notification.create({ data: { type: 'comment', text: 'commented on your post', postId: p.id, fromUserId: u.id, toUserId: p.userId } }); } res.status(201).json(c); } catch (err) { console.error(err); res.status(500).json({ error: "COMMENT_ERROR" }); } });
+app.get('/api/notifications/:username', async (req, res) => { try { const u = await prisma.user.findUnique({ where: { username: req.params.username } }); if (!u) return res.status(404).json({ error: "USER_NOT_FOUND" }); const n = await prisma.notification.findMany({ where: { toUserId: u.id }, include: { fromUser: { select: { username: true, nickname: true, avatar: true, status: true } } }, orderBy: { createdAt: 'desc' }, take: 30 }); res.json(n); } catch (err) { console.error(err); res.status(500).json({ error: "NOTIF_ERROR" }); } });
+app.post('/api/notifications/read/:id', async (req, res) => { try { await prisma.notification.update({ where: { id: req.params.id }, data: { read: true } }); res.json({ success: true }); } catch (err) { console.error(err); res.status(500).json({ error: "READ_ERROR" }); } });
+app.get('/api/stats', async (req, res) => { try { const [onlineCount, offlineCount, shadowCount] = await Promise.all([prisma.user.count({ where: { status: 'online' } }), prisma.user.count({ where: { status: 'offline' } }), prisma.user.count({ where: { status: 'shadow' } })]); res.json({ onlineCount, offlineCount, shadowCount }); } catch (err) { console.error(err); res.status(500).json({ error: "STATS_ERROR" }); } });
+app.post('/api/auth/register', async (req, res) => { const { username, password, gender, age, location, nickname } = req.body; const hp = await bcrypt.hash(password, 10); const ak = crypto.randomBytes(16).toString('hex'); const akh = await bcrypt.hash(ak, 10); try { if (nickname) { const en = await prisma.user.findFirst({ where: { nickname } }); if (en) return res.status(400).json({ error: "NICKNAME_TAKEN" }); } const nu = await prisma.user.create({ data: { username, passwordHash: hp, accessKeyHash: akh, nickname, gender: gender || "не указан", age: age || 0, location: location || "не_указано" } }); res.status(201).json({ username: nu.username, accessKey: ak, message: "ACCESS_KEY_SHOWN_ONCE_SAVE_IT" }); } catch (err) { console.error(err); res.status(400).json({ error: "USER_EXISTS" }); } });
+app.post('/api/auth/login', async (req, res) => { const u = await prisma.user.findUnique({ where: { username: req.body.username } }); if (!u || !(await bcrypt.compare(req.body.password, u.passwordHash))) return res.status(401).json({ error: 'INVALID_CREDENTIALS' }); res.json({ username: u.username, nickname: u.nickname, bio: u.bio, photo: u.avatar, status: u.status, location: u.location, languages: u.languages, age: u.age, gender: u.gender }); });
+app.post('/api/auth/login-with-key', async (req, res) => { const u = await prisma.user.findUnique({ where: { username: req.body.username } }); if (!u || !u.accessKeyHash) return res.status(401).json({ error: 'ACCOUNT_NOT_FOUND' }); if (!(await bcrypt.compare(req.body.accessKey, u.accessKeyHash))) return res.status(401).json({ error: 'INVALID_ACCESS_KEY' }); res.json({ username: u.username, nickname: u.nickname, bio: u.bio, photo: u.avatar, status: u.status, location: u.location, languages: u.languages, age: u.age, gender: u.gender }); });
 
 const PORT = 3001;
 httpServer.listen(PORT, () => console.log(`HUSH_SERVER_RUNNING: ${PORT}`));
